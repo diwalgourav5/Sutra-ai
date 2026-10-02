@@ -6,21 +6,24 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.data.model.ChatMessageEntity
 import com.example.data.model.ConversationEntity
+import com.example.data.model.GeneratedVideoEntity
 import com.example.data.model.UserProfileEntity
 
 @Database(
     entities = [
         UserProfileEntity::class,
         ConversationEntity::class,
-        ChatMessageEntity::class
+        ChatMessageEntity::class,
+        GeneratedVideoEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class SutraDatabase : RoomDatabase() {
     abstract fun userProfileDao(): UserProfileDao
     abstract fun conversationDao(): ConversationDao
     abstract fun chatMessageDao(): ChatMessageDao
+    abstract fun generatedVideoDao(): GeneratedVideoDao
 
     companion object {
         @Volatile

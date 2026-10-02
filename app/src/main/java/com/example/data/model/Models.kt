@@ -427,9 +427,126 @@ data class ApiDiagnosticsState(
     val activeEndpoint: String = "https://generativelanguage.googleapis.com/",
     val primaryChatModel: String = "gemini-3.5-flash",
     val reasoningMathModel: String = "gemini-3.1-pro-preview",
+    val videoFastModel: String = "veo-3.1-fast-generate-preview",
+    val videoHighModel: String = "veo-3.1-generate-preview",
     val requestsInLastMinute: Int = 0,
     val maxRequestsPerMinute: Int = 15,
     val lastPingLatencyMs: Long? = null,
     val lastPingStatus: String = "Ready — Click 'Verify Connection' to test live API",
     val isTestingConnection: Boolean = false
 )
+
+// --- AI Video Generation Domain Models ---
+
+enum class VideoDurationOption(val seconds: Int, val label: String) {
+    SECONDS_4(4, "4s"),
+    SECONDS_5(5, "5s"),
+    SECONDS_6(6, "6s"),
+    SECONDS_7(7, "7s"),
+    SECONDS_8(8, "8s");
+
+    companion object {
+        fun fromSeconds(sec: Int): VideoDurationOption =
+            entries.find { it.seconds == sec }
+                ?: when {
+                    sec <= 4 -> SECONDS_4
+                    sec >= 8 -> SECONDS_8
+                    else -> SECONDS_5
+                }
+    }
+}
+
+enum class VideoAspectRatioOption(
+    val apiValue: String,
+    val label: String,
+    val ratioFloat: Float
+) {
+    LANDSCAPE_16_9("16:9", "16:9 Landscape", 16f / 9f),
+    PORTRAIT_9_16("9:16", "9:16 Vertical", 9f / 16f),
+    SQUARE_1_1("1:1", "1:1 Square", 1f);
+
+    companion object {
+        fun fromApiValue(value: String?): VideoAspectRatioOption =
+            entries.find { it.apiValue == value } ?: LANDSCAPE_16_9
+    }
+}
+
+enum class VideoQualityOption(
+    val label: String,
+    val subtitle: String,
+    val modelId: String,
+    val resolutionParam: String
+) {
+    STANDARD(
+        label = "Standard",
+        subtitle = "Fast Generation • 720p/1080p (Veo 3.1 Fast)",
+        modelId = "veo-3.1-fast-generate-preview",
+        resolutionParam = "720p"
+    ),
+    HIGH(
+        label = "High",
+        subtitle = "Cinema Grade • 1080p (Veo 3.1 Pro)",
+        modelId = "veo-3.1-generate-preview",
+        resolutionParam = "1080p"
+    );
+
+    companion object {
+        fun fromLabel(label: String?): VideoQualityOption =
+            entries.find { it.label.equals(label, ignoreCase = true) } ?: STANDARD
+    }
+}
+
+enum class VideoJobStatus {
+    GENERATING,
+    COMPLETED,
+    FAILED
+}
+
+enum class VideoErrorCategory(val title: String) {
+    INVALID_PROMPT("Invalid Prompt"),
+    UNSUPPORTED_IMAGE("Unsupported Image"),
+    API_ERROR("Video API Error"),
+    GENERATION_FAILURE("Generation Failed"),
+    NETWORK_FAILURE("Network Connection Failure"),
+    TIMEOUT("Generation Timeout"),
+    RATE_LIMIT("Usage / Rate Limit Reached")
+}
+
+data class VideoGenerationProgress(
+    val isGenerating: Boolean = false,
+    val stageTitle: String = "",
+    val statusDetail: String = "",
+    val progressFraction: Float = 0f,
+    val elapsedSeconds: Int = 0,
+    val operationName: String? = null
+)
+
+@Entity(
+    tableName = "generated_videos",
+    indices = [Index(value = ["createdAt"])]
+)
+data class GeneratedVideoEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val prompt: String,
+    val durationSeconds: Int = 5,
+    val aspectRatio: String = "16:9",
+    val quality: String = "Standard",
+    val modelUsed: String = "veo-3.1-fast-generate-preview",
+    val hasSourceImage: Boolean = false,
+    val sourceImageName: String? = null,
+    val sourceImageMimeType: String? = null,
+    val sourceImageBase64: String? = null,
+    val thumbnailBase64: String? = null,
+    val videoLocalPath: String? = null,
+    val videoRemoteUri: String? = null,
+    val status: String = VideoJobStatus.COMPLETED.name,
+    val errorCategory: String? = null,
+    val errorMessage: String? = null,
+    val createdAt: Long = System.currentTimeMillis()
+) {
+    val parsedStatus: VideoJobStatus
+        get() = runCatching { VideoJobStatus.valueOf(status) }.getOrDefault(VideoJobStatus.COMPLETED)
+
+    val parsedAspectRatio: VideoAspectRatioOption
+        get() = VideoAspectRatioOption.fromApiValue(aspectRatio)
+}

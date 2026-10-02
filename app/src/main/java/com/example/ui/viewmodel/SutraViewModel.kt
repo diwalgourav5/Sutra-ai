@@ -14,12 +14,21 @@ import com.example.data.model.AssistantMode
 import com.example.data.model.AvatarPreset
 import com.example.data.model.ChatMessageEntity
 import com.example.data.model.ConversationEntity
+import com.example.data.model.GeneratedVideoEntity
 import com.example.data.model.MathCategory
 import com.example.data.model.PendingAttachment
 import com.example.data.model.TextSizeOption
 import com.example.data.model.UserProfileEntity
+import com.example.data.model.VideoAspectRatioOption
+import com.example.data.model.VideoDurationOption
+import com.example.data.model.VideoGenerationProgress
+import com.example.data.model.VideoJobStatus
+import com.example.data.model.VideoQualityOption
 import com.example.data.remote.AiGenerationResult
 import com.example.data.remote.ApiConfig
+import com.example.data.remote.GeminiVeoVideoProvider
+import com.example.data.remote.VideoGenerationOutcome
+import com.example.data.remote.VideoGenerationRequest
 import com.example.data.repository.SutraRepository
 import com.example.util.AttachmentHelper
 import com.example.util.BackupExportHelper
@@ -42,7 +51,8 @@ import kotlinx.coroutines.launch
 
 enum class AppDestination(val route: String, val label: String) {
     CHAT("chat", "Chat"),
-    MATH_SOLVER("math_solver", "Math Solver"),
+    MATH_SOLVER("math_solver", "Math"),
+    AI_VIDEO("ai_video", "AI Video"),
     HISTORY("history", "History"),
     PROFILE("profile", "Profile"),
     SETTINGS("settings", "Settings")
@@ -158,6 +168,40 @@ class SutraViewModel(
     val mathSolutionResult: StateFlow<AiGenerationResult?> = _mathSolutionResult.asStateFlow()
 
     private var mathSolverJob: Job? = null
+
+    // --- AI Video Generator Workspace State ---
+    private val _videoPromptText = MutableStateFlow("")
+    val videoPromptText: StateFlow<String> = _videoPromptText.asStateFlow()
+
+    private val _selectedVideoDuration = MutableStateFlow(VideoDurationOption.SECONDS_5)
+    val selectedVideoDuration: StateFlow<VideoDurationOption> = _selectedVideoDuration.asStateFlow()
+
+    private val _selectedVideoAspectRatio = MutableStateFlow(VideoAspectRatioOption.LANDSCAPE_16_9)
+    val selectedVideoAspectRatio: StateFlow<VideoAspectRatioOption> = _selectedVideoAspectRatio.asStateFlow()
+
+    private val _selectedVideoQuality = MutableStateFlow(VideoQualityOption.STANDARD)
+    val selectedVideoQuality: StateFlow<VideoQualityOption> = _selectedVideoQuality.asStateFlow()
+
+    private val _videoSourceImage = MutableStateFlow<PendingAttachment?>(null)
+    val videoSourceImage: StateFlow<PendingAttachment?> = _videoSourceImage.asStateFlow()
+
+    private val _videoProgress = MutableStateFlow(VideoGenerationProgress())
+    val videoProgress: StateFlow<VideoGenerationProgress> = _videoProgress.asStateFlow()
+
+    private val _activePlayingVideo = MutableStateFlow<GeneratedVideoEntity?>(null)
+    val activePlayingVideo: StateFlow<GeneratedVideoEntity?> = _activePlayingVideo.asStateFlow()
+
+    private val _videoErrorBanner = MutableStateFlow<Pair<String, String>?>(null)
+    val videoErrorBanner: StateFlow<Pair<String, String>?> = _videoErrorBanner.asStateFlow()
+
+    val myVideosHistory: StateFlow<List<GeneratedVideoEntity>> = repository.generatedVideosFlow
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    private var videoGenerationJob: Job? = null
 
     // --- API & Backend Diagnostics State ---
     private val _apiDiagnostics = MutableStateFlow(
@@ -899,6 +943,339 @@ class SutraViewModel(
         }
     }
 
+    // --- AI Video Generation Actions ---
+
+    fun updateVideoPrompt(text: String) {
+        _videoPromptText.value = text
+        if (_videoErrorBanner.value?.first == "Invalid Prompt" && text.trim().length >= 4) {
+            _videoErrorBanner.value = null
+        }
+    }
+
+    fun selectVideoDuration(duration: VideoDurationOption) {
+        _selectedVideoDuration.value = duration
+    }
+
+    fun selectVideoAspectRatio(ratio: VideoAspectRatioOption) {
+        _selectedVideoAspectRatio.value = ratio
+    }
+
+    fun selectVideoQuality(quality: VideoQualityOption) {
+        _selectedVideoQuality.value = quality
+    }
+
+    fun attachVideoSourceImageFromUri(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            _videoSourceImage.value = PendingAttachment(
+                uriString = uri.toString(),
+                fileName = "Loading image…",
+                mimeType = "image/jpeg",
+                uploadProgress = 0.2f,
+                isImage = true
+            )
+            val processed = AttachmentHelper.processUriAttachment(context, uri) { prog ->
+                _videoSourceImage.update { it?.copy(uploadProgress = prog) }
+            }
+            if (processed.errorMessage != null || !processed.isImage || processed.base64Data.isNullOrBlank()) {
+                val errMsg = processed.errorMessage
+                    ?: "Unsupported image format for Image-to-Video. Please select a valid JPEG, PNG, or WebP photo."
+                _videoErrorBanner.value = "Unsupported Image" to errMsg
+                _videoSourceImage.value = null
+            } else {
+                _videoSourceImage.value = processed
+                _videoErrorBanner.value = null
+            }
+        }
+    }
+
+    fun attachVideoCameraBitmap(bitmap: Bitmap) {
+        viewModelScope.launch {
+            val processed = AttachmentHelper.processCameraBitmap(bitmap) { prog ->
+                _videoSourceImage.update { it?.copy(uploadProgress = prog) }
+            }
+            _videoSourceImage.value = processed
+            _videoErrorBanner.value = null
+        }
+    }
+
+    fun clearVideoSourceImage() {
+        _videoSourceImage.value = null
+    }
+
+    fun dismissVideoErrorBanner() {
+        _videoErrorBanner.value = null
+    }
+
+    fun generateAiVideo(context: Context) {
+        if (_videoProgress.value.isGenerating) return
+        val rawPrompt = _videoPromptText.value.trim()
+        val duration = _selectedVideoDuration.value
+        val aspectRatio = _selectedVideoAspectRatio.value
+        val quality = _selectedVideoQuality.value
+        val sourceImg = _videoSourceImage.value
+
+        if (rawPrompt.length < 4) {
+            _videoErrorBanner.value = "Invalid Prompt" to
+                "Please enter a descriptive video prompt (at least 4 characters). Example: 'Create a cinematic realistic shot of a sports car driving through a mountain road during sunset.'"
+            return
+        }
+
+        if (duration.seconds !in 4..8) {
+            _videoErrorBanner.value = "Video API Error" to
+                "Video duration must be an integer between 4 and 8 seconds inclusive (received: ${duration.seconds}s)."
+            return
+        }
+
+        val profile = activeProfile.value
+        val sanitizedPrompt = ApiConfig.maskSensitiveTextIfEnabled(
+            rawPrompt,
+            profile.privacyMaskSensitiveData
+        )
+
+        executeVideoGeneration(
+            context = context,
+            request = VideoGenerationRequest(
+                prompt = sanitizedPrompt,
+                duration = duration,
+                aspectRatio = aspectRatio,
+                quality = quality,
+                sourceImage = sourceImg
+            ),
+            existingEntityId = null
+        )
+    }
+
+    fun retryVideoGeneration(context: Context, failedEntity: GeneratedVideoEntity? = null) {
+        if (_videoProgress.value.isGenerating) return
+        if (failedEntity != null) {
+            val duration = VideoDurationOption.fromSeconds(failedEntity.durationSeconds)
+            val aspectRatio = VideoAspectRatioOption.fromApiValue(failedEntity.aspectRatio)
+            val quality = VideoQualityOption.fromLabel(failedEntity.quality)
+            val reconstructedImage = if (failedEntity.hasSourceImage && !failedEntity.sourceImageBase64.isNullOrBlank()) {
+                PendingAttachment(
+                    uriString = "",
+                    fileName = failedEntity.sourceImageName ?: "Source_Image.jpg",
+                    mimeType = failedEntity.sourceImageMimeType ?: "image/jpeg",
+                    base64Data = failedEntity.sourceImageBase64,
+                    isImage = true
+                )
+            } else {
+                null
+            }
+
+            _videoPromptText.value = failedEntity.prompt
+            _selectedVideoDuration.value = duration
+            _selectedVideoAspectRatio.value = aspectRatio
+            _selectedVideoQuality.value = quality
+            _videoSourceImage.value = reconstructedImage
+
+            executeVideoGeneration(
+                context = context,
+                request = VideoGenerationRequest(
+                    prompt = failedEntity.prompt,
+                    duration = duration,
+                    aspectRatio = aspectRatio,
+                    quality = quality,
+                    sourceImage = reconstructedImage
+                ),
+                existingEntityId = failedEntity.id
+            )
+        } else {
+            generateAiVideo(context)
+        }
+    }
+
+    private fun executeVideoGeneration(
+        context: Context,
+        request: VideoGenerationRequest,
+        existingEntityId: Long?
+    ) {
+        _videoErrorBanner.value = null
+
+        videoGenerationJob = viewModelScope.launch {
+            _videoProgress.value = VideoGenerationProgress(
+                isGenerating = true,
+                stageTitle = "Starting Video Generation Job",
+                statusDetail = "Connecting to ${request.quality.modelId}…",
+                progressFraction = 0.05f,
+                elapsedSeconds = 0
+            )
+
+            // Create or update Room record in GENERATING state
+            val recordId = if (existingEntityId != null && existingEntityId > 0L) {
+                repository.updateGeneratedVideo(
+                    GeneratedVideoEntity(
+                        id = existingEntityId,
+                        prompt = request.prompt,
+                        durationSeconds = request.duration.seconds,
+                        aspectRatio = request.aspectRatio.apiValue,
+                        quality = request.quality.label,
+                        modelUsed = request.quality.modelId,
+                        hasSourceImage = request.sourceImage != null,
+                        sourceImageName = request.sourceImage?.fileName,
+                        sourceImageMimeType = request.sourceImage?.mimeType,
+                        sourceImageBase64 = request.sourceImage?.base64Data,
+                        thumbnailBase64 = request.sourceImage?.base64Data,
+                        status = VideoJobStatus.GENERATING.name
+                    )
+                )
+                existingEntityId
+            } else {
+                repository.insertGeneratedVideo(
+                    GeneratedVideoEntity(
+                        prompt = request.prompt,
+                        durationSeconds = request.duration.seconds,
+                        aspectRatio = request.aspectRatio.apiValue,
+                        quality = request.quality.label,
+                        modelUsed = request.quality.modelId,
+                        hasSourceImage = request.sourceImage != null,
+                        sourceImageName = request.sourceImage?.fileName,
+                        sourceImageMimeType = request.sourceImage?.mimeType,
+                        sourceImageBase64 = request.sourceImage?.base64Data,
+                        thumbnailBase64 = request.sourceImage?.base64Data,
+                        status = VideoJobStatus.GENERATING.name
+                    )
+                )
+            }
+
+            try {
+                val outcome = repository.generateVideoWithProvider(
+                    context = context,
+                    request = request,
+                    onProgress = { progressState ->
+                        _videoProgress.value = progressState
+                    }
+                )
+
+                _apiDiagnostics.update {
+                    it.copy(requestsInLastMinute = ApiConfig.getCurrentWindowRequestCount())
+                }
+
+                when (outcome) {
+                    is VideoGenerationOutcome.Success -> {
+                        val completedEntity = GeneratedVideoEntity(
+                            id = recordId,
+                            prompt = request.prompt,
+                            durationSeconds = request.duration.seconds,
+                            aspectRatio = request.aspectRatio.apiValue,
+                            quality = request.quality.label,
+                            modelUsed = outcome.modelUsed,
+                            hasSourceImage = request.sourceImage != null,
+                            sourceImageName = request.sourceImage?.fileName,
+                            sourceImageMimeType = request.sourceImage?.mimeType,
+                            sourceImageBase64 = request.sourceImage?.base64Data,
+                            thumbnailBase64 = outcome.thumbnailBase64 ?: request.sourceImage?.base64Data,
+                            videoLocalPath = outcome.localVideoFilePath,
+                            videoRemoteUri = outcome.remoteVideoUri,
+                            status = VideoJobStatus.COMPLETED.name,
+                            createdAt = System.currentTimeMillis()
+                        )
+                        repository.updateGeneratedVideo(completedEntity)
+                        _activePlayingVideo.value = completedEntity
+                        _snackbarMessage.value = "AI Video generated and ready to play!"
+                    }
+
+                    is VideoGenerationOutcome.Failure -> {
+                        val failedEntity = GeneratedVideoEntity(
+                            id = recordId,
+                            prompt = request.prompt,
+                            durationSeconds = request.duration.seconds,
+                            aspectRatio = request.aspectRatio.apiValue,
+                            quality = request.quality.label,
+                            modelUsed = outcome.modelAttempted,
+                            hasSourceImage = request.sourceImage != null,
+                            sourceImageName = request.sourceImage?.fileName,
+                            sourceImageMimeType = request.sourceImage?.mimeType,
+                            sourceImageBase64 = request.sourceImage?.base64Data,
+                            thumbnailBase64 = request.sourceImage?.base64Data,
+                            status = VideoJobStatus.FAILED.name,
+                            errorCategory = outcome.category.title,
+                            errorMessage = outcome.userMessage,
+                            createdAt = System.currentTimeMillis()
+                        )
+                        repository.updateGeneratedVideo(failedEntity)
+                        _videoErrorBanner.value = outcome.category.title to outcome.userMessage
+                    }
+                }
+            } catch (_: CancellationException) {
+                val cancelledEntity = GeneratedVideoEntity(
+                    id = recordId,
+                    prompt = request.prompt,
+                    durationSeconds = request.duration.seconds,
+                    aspectRatio = request.aspectRatio.apiValue,
+                    quality = request.quality.label,
+                    modelUsed = request.quality.modelId,
+                    hasSourceImage = request.sourceImage != null,
+                    sourceImageName = request.sourceImage?.fileName,
+                    sourceImageMimeType = request.sourceImage?.mimeType,
+                    sourceImageBase64 = request.sourceImage?.base64Data,
+                    thumbnailBase64 = request.sourceImage?.base64Data,
+                    status = VideoJobStatus.FAILED.name,
+                    errorCategory = "Cancelled",
+                    errorMessage = "Video generation cancelled by user."
+                )
+                repository.updateGeneratedVideo(cancelledEntity)
+            } finally {
+                _videoProgress.value = VideoGenerationProgress(isGenerating = false)
+                videoGenerationJob = null
+            }
+        }
+    }
+
+    fun cancelVideoGeneration() {
+        videoGenerationJob?.cancel()
+        videoGenerationJob = null
+        _videoProgress.value = VideoGenerationProgress(isGenerating = false)
+        _snackbarMessage.value = "Video generation stopped."
+    }
+
+    fun selectVideoForPlayback(video: GeneratedVideoEntity) {
+        _activePlayingVideo.value = video
+    }
+
+    fun deleteGeneratedVideo(videoId: Long) {
+        viewModelScope.launch {
+            if (_activePlayingVideo.value?.id == videoId) {
+                _activePlayingVideo.value = null
+            }
+            repository.deleteGeneratedVideo(videoId)
+            _snackbarMessage.value = "Video deleted from My Videos"
+        }
+    }
+
+    fun exportVideoToCustomUri(context: Context, video: GeneratedVideoEntity, targetUri: Uri) {
+        val localPath = video.videoLocalPath
+        if (localPath.isNullOrBlank()) {
+            _snackbarMessage.value = "No local video file available to export."
+            return
+        }
+        viewModelScope.launch {
+            val (ok, msg) = GeminiVeoVideoProvider.exportVideoFileToUri(context, localPath, targetUri)
+            _snackbarMessage.value = msg
+        }
+    }
+
+    fun quickSaveVideoCopy(context: Context, video: GeneratedVideoEntity) {
+        val localPath = video.videoLocalPath
+        if (localPath.isNullOrBlank()) {
+            _snackbarMessage.value = "No local video file available to save."
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val srcFile = java.io.File(localPath)
+                val exportDir = context.getExternalFilesDir("exported_videos")
+                    ?: java.io.File(context.filesDir, "exported_videos")
+                if (!exportDir.exists()) exportDir.mkdirs()
+                val outFile = java.io.File(exportDir, "SutraAI_Video_${video.id}.mp4")
+                srcFile.copyTo(outFile, overwrite = true)
+                _snackbarMessage.value = "Saved MP4 to: ${outFile.absolutePath}"
+            } catch (e: Exception) {
+                _snackbarMessage.value = "Export failed: ${e.localizedMessage}"
+            }
+        }
+    }
+
     // --- API Verification ---
 
     fun verifyApiConnection() {
@@ -958,7 +1335,8 @@ class SutraViewModel(
             val repository = SutraRepository(
                 userProfileDao = db.userProfileDao(),
                 conversationDao = db.conversationDao(),
-                chatMessageDao = db.chatMessageDao()
+                chatMessageDao = db.chatMessageDao(),
+                generatedVideoDao = db.generatedVideoDao()
             )
             val voiceManager = VoiceManager(context)
             return SutraViewModel(repository, voiceManager) as T

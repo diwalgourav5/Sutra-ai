@@ -81,4 +81,36 @@ class ExampleRobolectricTest {
         assertTrue(txtExport.success)
         assertTrue(txtExport.contentPreview.contains("SUTRA AI"))
     }
+
+    @Test
+    fun `video duration options are integers strictly between 4 and 8 inclusive`() {
+        val options = com.example.data.model.VideoDurationOption.entries
+        assertEquals(5, options.size)
+        val expectedSeconds = listOf(4, 5, 6, 7, 8)
+        assertEquals(expectedSeconds, options.map { it.seconds })
+
+        options.forEach { opt ->
+            assertTrue(opt.seconds in 4..8)
+            assertEquals("${opt.seconds}s", opt.label)
+        }
+
+        // Test fromSeconds mapping and fallback
+        assertEquals(com.example.data.model.VideoDurationOption.SECONDS_4, com.example.data.model.VideoDurationOption.fromSeconds(4))
+        assertEquals(com.example.data.model.VideoDurationOption.SECONDS_7, com.example.data.model.VideoDurationOption.fromSeconds(7))
+        assertEquals(com.example.data.model.VideoDurationOption.SECONDS_8, com.example.data.model.VideoDurationOption.fromSeconds(8))
+    }
+
+    @Test
+    fun `veo video payload serializes durationSeconds as integer literal`() {
+        val durationOpt = com.example.data.model.VideoDurationOption.SECONDS_6
+        val configJson = org.json.JSONObject().apply {
+            put("durationSeconds", durationOpt.seconds)
+        }
+        val serialized = configJson.toString()
+        // Must be integer literal :6 and NOT string :"6s" or :"6"
+        assertTrue(serialized.contains("\"durationSeconds\":6"))
+        assertTrue(!serialized.contains("\"6s\""))
+        assertTrue(!serialized.contains("\"durationSeconds\":\"6\""))
+        assertEquals(6, configJson.getInt("durationSeconds"))
+    }
 }

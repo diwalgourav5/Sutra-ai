@@ -1,26 +1,37 @@
 package com.example.data.repository
 
+import android.content.Context
 import com.example.data.local.ChatMessageDao
 import com.example.data.local.ConversationDao
+import com.example.data.local.GeneratedVideoDao
 import com.example.data.local.UserProfileDao
 import com.example.data.model.AppLanguage
 import com.example.data.model.AssistantMode
 import com.example.data.model.ChatMessageEntity
 import com.example.data.model.ConversationEntity
+import com.example.data.model.GeneratedVideoEntity
 import com.example.data.model.MathCategory
 import com.example.data.model.PendingAttachment
 import com.example.data.model.UserProfileEntity
+import com.example.data.model.VideoGenerationProgress
 import com.example.data.model.WebSource
 import com.example.data.remote.AiGenerationResult
 import com.example.data.remote.ApiConfig
 import com.example.data.remote.GeminiApiClient
+import com.example.data.remote.GeminiVeoVideoProvider
+import com.example.data.remote.VideoGenerationOutcome
+import com.example.data.remote.VideoGenerationProvider
+import com.example.data.remote.VideoGenerationRequest
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 class SutraRepository(
     private val userProfileDao: UserProfileDao,
     private val conversationDao: ConversationDao,
     private val chatMessageDao: ChatMessageDao,
-    private val apiClient: GeminiApiClient = GeminiApiClient()
+    private val generatedVideoDao: GeneratedVideoDao? = null,
+    private val apiClient: GeminiApiClient = GeminiApiClient(),
+    private val videoProvider: VideoGenerationProvider = GeminiVeoVideoProvider()
 ) {
     // --- User Profile Management ---
 
@@ -172,7 +183,7 @@ class SutraRepository(
         chatMessageDao.deleteMessagesAfterId(conversationId, afterMessageId)
     }
 
-    // --- AI Generation & Diagnostics ---
+    // --- AI Chat Generation & Diagnostics ---
 
     suspend fun streamAiReply(
         history: List<ChatMessageEntity>,
@@ -200,5 +211,38 @@ class SutraRepository(
 
     suspend fun verifyBackendConnection(): Pair<Boolean, String> {
         return apiClient.verifyConnection()
+    }
+
+    // --- AI Video Generation & "My Videos" History ---
+
+    val generatedVideosFlow: Flow<List<GeneratedVideoEntity>> =
+        generatedVideoDao?.observeAllVideos() ?: flowOf(emptyList())
+
+    suspend fun insertGeneratedVideo(entity: GeneratedVideoEntity): Long {
+        return generatedVideoDao?.insertVideo(entity) ?: 0L
+    }
+
+    suspend fun updateGeneratedVideo(entity: GeneratedVideoEntity) {
+        generatedVideoDao?.updateVideo(entity)
+    }
+
+    suspend fun deleteGeneratedVideo(videoId: Long) {
+        val existing = generatedVideoDao?.getVideoById(videoId)
+        if (existing?.videoLocalPath != null) {
+            runCatching { java.io.File(existing.videoLocalPath).delete() }
+        }
+        generatedVideoDao?.deleteVideoById(videoId)
+    }
+
+    suspend fun generateVideoWithProvider(
+        context: Context,
+        request: VideoGenerationRequest,
+        onProgress: suspend (VideoGenerationProgress) -> Unit
+    ): VideoGenerationOutcome {
+        return videoProvider.generateVideo(
+            context = context,
+            request = request,
+            onProgress = onProgress
+        )
     }
 }

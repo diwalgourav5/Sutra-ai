@@ -38,16 +38,19 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MovieFilter
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.outlined.Calculate
-import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -83,6 +86,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.AppThemeMode
 import com.example.data.model.AvatarPreset
 import com.example.data.model.ConversationEntity
+import com.example.data.model.GeneratedVideoEntity
 import com.example.data.model.UserProfileEntity
 import com.example.ui.components.ProfileAvatarBadge
 import com.example.ui.components.SutraBrandAvatar
@@ -92,6 +96,7 @@ import com.example.ui.screens.HistoryScreen
 import com.example.ui.screens.MathSolverScreen
 import com.example.ui.screens.ProfileScreen
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.VideoGeneratorScreen
 import com.example.ui.theme.SutraAITheme
 import com.example.ui.viewmodel.AppDestination
 import com.example.ui.viewmodel.SutraViewModel
@@ -102,6 +107,12 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+
+private enum class MediaCaptureTarget {
+    CHAT,
+    MATH,
+    VIDEO
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -164,6 +175,17 @@ fun SutraAssistantRootApp(viewModel: SutraViewModel) {
     val mathStreamingText by viewModel.mathStreamingText.collectAsStateWithLifecycle()
     val mathSolutionResult by viewModel.mathSolutionResult.collectAsStateWithLifecycle()
 
+    // AI Video Generator States
+    val videoPromptText by viewModel.videoPromptText.collectAsStateWithLifecycle()
+    val selectedVideoDuration by viewModel.selectedVideoDuration.collectAsStateWithLifecycle()
+    val selectedVideoAspectRatio by viewModel.selectedVideoAspectRatio.collectAsStateWithLifecycle()
+    val selectedVideoQuality by viewModel.selectedVideoQuality.collectAsStateWithLifecycle()
+    val videoSourceImage by viewModel.videoSourceImage.collectAsStateWithLifecycle()
+    val videoProgress by viewModel.videoProgress.collectAsStateWithLifecycle()
+    val activePlayingVideo by viewModel.activePlayingVideo.collectAsStateWithLifecycle()
+    val videoErrorBanner by viewModel.videoErrorBanner.collectAsStateWithLifecycle()
+    val myVideosHistory by viewModel.myVideosHistory.collectAsStateWithLifecycle()
+
     // API Diagnostics
     val apiDiagnostics by viewModel.apiDiagnostics.collectAsStateWithLifecycle()
 
@@ -173,15 +195,19 @@ fun SutraAssistantRootApp(viewModel: SutraViewModel) {
     val speakingMessageId by (viewModel.voiceManager?.speakingMessageId ?: remember { MutableStateFlow(null) })
         .collectAsStateWithLifecycle()
 
-    // Track whether the photo/camera launch is for MathSolver or Chat
-    var mediaTargetForMath by rememberSaveable { mutableStateOf(false) }
+    // Track whether the photo/camera launch is for Chat, MathSolver, or AI Video
+    var mediaTarget by rememberSaveable { mutableStateOf(MediaCaptureTarget.CHAT) }
 
-    // 1. Zero-Permission Photo Picker for Chat / Math Solver Image Understanding
+    // 1. Zero-Permission Photo Picker for Chat / Math Solver / AI Video Image-to-Video
     val galleryImagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
-            viewModel.attachFromUri(context, uri, forMathSolver = mediaTargetForMath)
+            when (mediaTarget) {
+                MediaCaptureTarget.CHAT -> viewModel.attachFromUri(context, uri, forMathSolver = false)
+                MediaCaptureTarget.MATH -> viewModel.attachFromUri(context, uri, forMathSolver = true)
+                MediaCaptureTarget.VIDEO -> viewModel.attachVideoSourceImageFromUri(context, uri)
+            }
         }
     }
 
@@ -211,7 +237,11 @@ fun SutraAssistantRootApp(viewModel: SutraViewModel) {
         contract = ActivityResultContracts.TakePicturePreview()
     ) { bitmap ->
         if (bitmap != null) {
-            viewModel.attachCameraBitmap(bitmap, forMathSolver = mediaTargetForMath)
+            when (mediaTarget) {
+                MediaCaptureTarget.CHAT -> viewModel.attachCameraBitmap(bitmap, forMathSolver = false)
+                MediaCaptureTarget.MATH -> viewModel.attachCameraBitmap(bitmap, forMathSolver = true)
+                MediaCaptureTarget.VIDEO -> viewModel.attachVideoCameraBitmap(bitmap)
+            }
         }
     }
 
@@ -249,7 +279,18 @@ fun SutraAssistantRootApp(viewModel: SutraViewModel) {
         }
     }
 
-    // 6. Speech-to-Text Launcher
+    // 6. Custom Save-As Export Launcher for MP4 Video
+    var pendingExportVideoEntity by remember { mutableStateOf<GeneratedVideoEntity?>(null) }
+    val createVideoDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("video/mp4")
+    ) { uri ->
+        val videoToExport = pendingExportVideoEntity
+        if (uri != null && videoToExport != null) {
+            viewModel.exportVideoToCustomUri(context, videoToExport, uri)
+        }
+    }
+
+    // 7. Speech-to-Text Launcher
     val speechRecognizerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -302,6 +343,10 @@ fun SutraAssistantRootApp(viewModel: SutraViewModel) {
                 onStartNewChat = {
                     coroutineScope.launch { drawerState.close() }
                     viewModel.startNewChat()
+                },
+                onOpenAiVideoStudio = {
+                    coroutineScope.launch { drawerState.close() }
+                    viewModel.navigateTo(AppDestination.AI_VIDEO)
                 },
                 onSelectConversation = { id ->
                     coroutineScope.launch { drawerState.close() }
@@ -368,13 +413,13 @@ fun SutraAssistantRootApp(viewModel: SutraViewModel) {
                             onToggleWebSearch = viewModel::toggleWebSearch,
                             onCycleLanguage = viewModel::updatePreferredLanguage,
                             onPickGalleryImage = {
-                                mediaTargetForMath = false
+                                mediaTarget = MediaCaptureTarget.CHAT
                                 galleryImagePicker.launch(
                                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                 )
                             },
                             onTakeCameraPhoto = {
-                                mediaTargetForMath = false
+                                mediaTarget = MediaCaptureTarget.CHAT
                                 cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
                             },
                             onPickDocumentFile = {
@@ -418,13 +463,13 @@ fun SutraAssistantRootApp(viewModel: SutraViewModel) {
                             onUpdateInput = viewModel::updateMathInput,
                             onInsertSymbol = viewModel::insertMathSymbol,
                             onPickMathImage = {
-                                mediaTargetForMath = true
+                                mediaTarget = MediaCaptureTarget.MATH
                                 galleryImagePicker.launch(
                                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                 )
                             },
                             onTakeMathCamera = {
-                                mediaTargetForMath = true
+                                mediaTarget = MediaCaptureTarget.MATH
                                 cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
                             },
                             onClearAttachment = { viewModel.clearPendingAttachment(forMathSolver = true) },
@@ -441,6 +486,52 @@ fun SutraAssistantRootApp(viewModel: SutraViewModel) {
                                 )
                             },
                             onShowToast = viewModel::showMessage
+                        )
+                    }
+
+                    AppDestination.AI_VIDEO -> {
+                        VideoGeneratorScreen(
+                            promptText = videoPromptText,
+                            selectedDuration = selectedVideoDuration,
+                            selectedAspectRatio = selectedVideoAspectRatio,
+                            selectedQuality = selectedVideoQuality,
+                            sourceImage = videoSourceImage,
+                            progress = videoProgress,
+                            activePlayingVideo = activePlayingVideo,
+                            errorBanner = videoErrorBanner,
+                            myVideos = myVideosHistory,
+                            isApiKeyConfigured = apiDiagnostics.isKeyConfigured,
+                            onUpdatePrompt = viewModel::updateVideoPrompt,
+                            onSelectDuration = viewModel::selectVideoDuration,
+                            onSelectAspectRatio = viewModel::selectVideoAspectRatio,
+                            onSelectQuality = viewModel::selectVideoQuality,
+                            onPickSourceImage = {
+                                mediaTarget = MediaCaptureTarget.VIDEO
+                                galleryImagePicker.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            onTakeSourceCameraPhoto = {
+                                mediaTarget = MediaCaptureTarget.VIDEO
+                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                            },
+                            onClearSourceImage = viewModel::clearVideoSourceImage,
+                            onGenerateVideo = { viewModel.generateAiVideo(context) },
+                            onCancelGeneration = viewModel::cancelVideoGeneration,
+                            onRetryGeneration = { failedEntity ->
+                                viewModel.retryVideoGeneration(context, failedEntity)
+                            },
+                            onDismissErrorBanner = viewModel::dismissVideoErrorBanner,
+                            onSelectVideoForPlayback = viewModel::selectVideoForPlayback,
+                            onDeleteVideo = viewModel::deleteGeneratedVideo,
+                            onQuickSaveVideo = { video ->
+                                viewModel.quickSaveVideoCopy(context, video)
+                            },
+                            onExportVideoAs = { video ->
+                                pendingExportVideoEntity = video
+                                val ts = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())
+                                createVideoDocumentLauncher.launch("sutra_ai_video_$ts.mp4")
+                            }
                         )
                     }
 
@@ -550,6 +641,7 @@ private fun SutraNavigationDrawerSheet(
     conversations: List<ConversationEntity>,
     activeConversationId: Long?,
     onStartNewChat: () -> Unit,
+    onOpenAiVideoStudio: () -> Unit,
     onSelectConversation: (Long) -> Unit,
     onOpenAllHistory: () -> Unit,
     onOpenProfile: () -> Unit,
@@ -579,7 +671,7 @@ private fun SutraNavigationDrawerSheet(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Conversational & Math Assistant",
+                        text = "Chat • Math • AI Video Studio",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -635,6 +727,20 @@ private fun SutraNavigationDrawerSheet(
                 Icon(Icons.Default.Add, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("New Conversation", fontWeight = FontWeight.Bold)
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            FilledTonalButton(
+                onClick = onOpenAiVideoStudio,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .testTag("drawer_ai_video_button")
+            ) {
+                Icon(Icons.Default.MovieFilter, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("AI Video Generator", fontWeight = FontWeight.SemiBold)
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -731,6 +837,7 @@ private fun SutraBottomNavigationBar(
             val (selectedIcon, unselectedIcon) = when (dest) {
                 AppDestination.CHAT -> Icons.AutoMirrored.Filled.Chat to Icons.AutoMirrored.Outlined.Chat
                 AppDestination.MATH_SOLVER -> Icons.Default.Calculate to Icons.Outlined.Calculate
+                AppDestination.AI_VIDEO -> Icons.Default.Videocam to Icons.Outlined.Videocam
                 AppDestination.HISTORY -> Icons.Default.History to Icons.Outlined.History
                 AppDestination.PROFILE -> Icons.Default.Person to Icons.Outlined.Person
                 AppDestination.SETTINGS -> Icons.Default.Settings to Icons.Outlined.Settings
