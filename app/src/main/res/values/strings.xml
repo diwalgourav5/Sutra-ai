@@ -1,0 +1,31 @@
+<resources>
+    <string name="app_name">Sutra AI</string>
+    <string name="app_tagline">Intelligent Assistant, Math Solver &amp; Study Companion</string>
+    <string name="nav_chat">Chat</string>
+    <string name="nav_math">Math Solver</string>
+    <string name="nav_history">History</string>
+    <string name="nav_profile">Profile</string>
+    <string name="nav_settings">Settings</string>
+    <string name="new_chat">New Chat</string>
+    <string name="composer_hint">Ask anything in English, Hindi, or Hinglish…</string>
+    <string name="send_message">Send message</string>
+    <string name="stop_generating">Stop generating</string>
+    <string name="attach_media">Attach image or document</string>
+    <string name="voice_input">Voice input</string>
+    <string name="copy_response">Copy response</string>
+    <string name="regenerate_response">Regenerate response</string>
+    <string name="edit_message">Edit message</string>
+    <string name="speak_response">Read aloud</string>
+    <string name="web_search_mode">Web Search</string>
+    <string name="search_chats_hint">Search conversations and messages…</string>
+    <string name="rename_chat">Rename Conversation</string>
+    <string name="delete_chat">Delete Conversation</string>
+    <string name="profile_title">User Profile &amp; Preferences</string>
+    <string name="profile_username_label">Username</string>
+    <string name="profile_bio_label">Study / Work Focus &amp; Bio</string>
+    <string name="profile_save">Save Profile</string>
+    <string name="math_solver_title">Step-by-Step Math Solver</string>
+    <string name="math_input_hint">Enter an equation, matrix, calculus integral, or word problem…</string>
+    <string name="solve_step_by_step">Solve Step-by-Step</string>
+    <string name="api_status_title">API &amp; Backend Status</string>
+</resources>

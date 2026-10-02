@@ -1,0 +1,6 @@
+{
+  "name": "Sutra AI",
+  "description": "Intelligent conversational AI assistant, step-by-step math solver, study partner, coding helper, and vision analyzer supporting English, Hindi, and Hinglish.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
