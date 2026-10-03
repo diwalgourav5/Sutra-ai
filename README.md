@@ -118,7 +118,7 @@ Sutra AI reads your API key securely via the **Secrets Gradle Plugin** and `Buil
 ### Option B: Local `.env` File
 Create a `.env` file in the root directory (based on `.env.example`):
 ```env
-GEMINI_API_KEY=AIzaSy...Your_Actual_API_Key
+GEMINI_API_KEY_
 ```
 *(Note: `.env` is listed in `.gitignore` and will never be committed to git).*
 
