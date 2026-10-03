@@ -8,7 +8,7 @@ import androidx.room.Transaction
 import androidx.room.Update
 import com.example.data.model.ChatMessageEntity
 import com.example.data.model.ConversationEntity
-import com.example.data.model.GeneratedVideoEntity
+import com.example.data.model.GeneratedImageEntity
 import com.example.data.model.UserProfileEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -130,22 +130,22 @@ interface ChatMessageDao {
 }
 
 @Dao
-interface GeneratedVideoDao {
-    @Query("SELECT * FROM generated_videos ORDER BY createdAt DESC")
-    fun observeAllVideos(): Flow<List<GeneratedVideoEntity>>
+interface GeneratedImageDao {
+    @Query("SELECT * FROM generated_images ORDER BY createdAt DESC")
+    fun observeAllImages(): Flow<List<GeneratedImageEntity>>
 
-    @Query("SELECT * FROM generated_videos WHERE id = :videoId LIMIT 1")
-    suspend fun getVideoById(videoId: Long): GeneratedVideoEntity?
+    @Query("SELECT * FROM generated_images WHERE id = :imageId LIMIT 1")
+    suspend fun getImageById(imageId: Long): GeneratedImageEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertVideo(video: GeneratedVideoEntity): Long
+    suspend fun insertImage(image: GeneratedImageEntity): Long
 
     @Update
-    suspend fun updateVideo(video: GeneratedVideoEntity)
+    suspend fun updateImage(image: GeneratedImageEntity)
 
-    @Query("DELETE FROM generated_videos WHERE id = :videoId")
-    suspend fun deleteVideoById(videoId: Long)
+    @Query("DELETE FROM generated_images WHERE id = :imageId")
+    suspend fun deleteImageById(imageId: Long)
 
-    @Query("DELETE FROM generated_videos")
-    suspend fun deleteAllVideos()
+    @Query("DELETE FROM generated_images")
+    suspend fun deleteAllImages()
 }

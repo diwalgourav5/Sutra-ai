@@ -3,25 +3,23 @@ package com.example.data.repository
 import android.content.Context
 import com.example.data.local.ChatMessageDao
 import com.example.data.local.ConversationDao
-import com.example.data.local.GeneratedVideoDao
+import com.example.data.local.GeneratedImageDao
 import com.example.data.local.UserProfileDao
 import com.example.data.model.AppLanguage
 import com.example.data.model.AssistantMode
 import com.example.data.model.ChatMessageEntity
 import com.example.data.model.ConversationEntity
-import com.example.data.model.GeneratedVideoEntity
+import com.example.data.model.GeneratedImageEntity
 import com.example.data.model.MathCategory
 import com.example.data.model.PendingAttachment
 import com.example.data.model.UserProfileEntity
-import com.example.data.model.VideoGenerationProgress
 import com.example.data.model.WebSource
 import com.example.data.remote.AiGenerationResult
 import com.example.data.remote.ApiConfig
 import com.example.data.remote.GeminiApiClient
-import com.example.data.remote.GeminiVeoVideoProvider
-import com.example.data.remote.VideoGenerationOutcome
-import com.example.data.remote.VideoGenerationProvider
-import com.example.data.remote.VideoGenerationRequest
+import com.example.data.remote.GeminiImageGenerationProvider
+import com.example.data.remote.ImageGenerationOutcome
+import com.example.data.remote.ImageGenerationRequest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 
@@ -29,9 +27,9 @@ class SutraRepository(
     private val userProfileDao: UserProfileDao,
     private val conversationDao: ConversationDao,
     private val chatMessageDao: ChatMessageDao,
-    private val generatedVideoDao: GeneratedVideoDao? = null,
+    private val generatedImageDao: GeneratedImageDao? = null,
     private val apiClient: GeminiApiClient = GeminiApiClient(),
-    private val videoProvider: VideoGenerationProvider = GeminiVeoVideoProvider()
+    private val imageProvider: GeminiImageGenerationProvider = GeminiImageGenerationProvider()
 ) {
     // --- User Profile Management ---
 
@@ -213,36 +211,30 @@ class SutraRepository(
         return apiClient.verifyConnection()
     }
 
-    // --- AI Video Generation & "My Videos" History ---
+    // --- AI Image Generation & "My Images" History ---
 
-    val generatedVideosFlow: Flow<List<GeneratedVideoEntity>> =
-        generatedVideoDao?.observeAllVideos() ?: flowOf(emptyList())
+    val generatedImagesFlow: Flow<List<GeneratedImageEntity>> =
+        generatedImageDao?.observeAllImages() ?: flowOf(emptyList())
 
-    suspend fun insertGeneratedVideo(entity: GeneratedVideoEntity): Long {
-        return generatedVideoDao?.insertVideo(entity) ?: 0L
+    suspend fun insertGeneratedImage(entity: GeneratedImageEntity): Long {
+        return generatedImageDao?.insertImage(entity) ?: 0L
     }
 
-    suspend fun updateGeneratedVideo(entity: GeneratedVideoEntity) {
-        generatedVideoDao?.updateVideo(entity)
-    }
-
-    suspend fun deleteGeneratedVideo(videoId: Long) {
-        val existing = generatedVideoDao?.getVideoById(videoId)
-        if (existing?.videoLocalPath != null) {
-            runCatching { java.io.File(existing.videoLocalPath).delete() }
+    suspend fun deleteGeneratedImage(imageId: Long) {
+        val existing = generatedImageDao?.getImageById(imageId)
+        if (existing?.imageLocalPath != null) {
+            runCatching { java.io.File(existing.imageLocalPath).delete() }
         }
-        generatedVideoDao?.deleteVideoById(videoId)
+        generatedImageDao?.deleteImageById(imageId)
     }
 
-    suspend fun generateVideoWithProvider(
+    suspend fun generateImageWithGemini(
         context: Context,
-        request: VideoGenerationRequest,
-        onProgress: suspend (VideoGenerationProgress) -> Unit
-    ): VideoGenerationOutcome {
-        return videoProvider.generateVideo(
+        request: ImageGenerationRequest
+    ): ImageGenerationOutcome {
+        return imageProvider.generateImage(
             context = context,
-            request = request,
-            onProgress = onProgress
+            request = request
         )
     }
 }

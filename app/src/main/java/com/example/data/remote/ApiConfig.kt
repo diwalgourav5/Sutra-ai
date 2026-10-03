@@ -41,17 +41,8 @@ object ApiConfig {
     const val MODEL_FAST_MULTIMODAL: String = "gemini-3.5-flash"
     const val MODEL_COMPLEX_REASONING: String = "gemini-3.1-pro-preview"
     const val MODEL_FALLBACK: String = "gemini-flash-latest"
-    const val MODEL_VIDEO_FAST: String = "veo-3.1-fast-generate-preview"
-    const val MODEL_VIDEO_HIGH: String = "veo-3.1-generate-preview"
-
-    /**
-     * Base URL for AI Video Generation backend (defaults to Gemini REST API,
-     * can be pointed to a custom video generation proxy server).
-     */
-    const val VIDEO_BACKEND_BASE_URL: String = BACKEND_BASE_URL
-
-    const val VIDEO_POLL_INTERVAL_MS: Long = 4_000L
-    const val VIDEO_GENERATION_TIMEOUT_MS: Long = 180_000L
+    const val MODEL_IMAGE_GENERATION: String = "gemini-3.1-flash-image"
+    const val MODEL_IMAGE_FALLBACK: String = "gemini-2.5-flash-image"
 
     /**
      * Client-side request validation and rate limiting constants.
@@ -70,26 +61,6 @@ object ApiConfig {
         } catch (_: Exception) {
             ""
         }
-    }
-
-    /**
-     * Retrieves the dedicated VIDEO_API_KEY if configured in the AI Studio Secrets panel,
-     * otherwise falls back to GEMINI_API_KEY for Google Veo video generation.
-     */
-    fun getVideoApiKey(): String {
-        val dedicated = try {
-            BuildConfig.VIDEO_API_KEY.trim()
-        } catch (_: Exception) {
-            ""
-        }
-        if (dedicated.isNotBlank() &&
-            dedicated != "MY_VIDEO_API_KEY" &&
-            dedicated != "YOUR_API_KEY" &&
-            !dedicated.startsWith("PLACEHOLDER")
-        ) {
-            return dedicated
-        }
-        return getApiKey()
     }
 
     /**

@@ -3,7 +3,7 @@
     <string name="app_tagline">Intelligent Assistant, Math Solver &amp; Study Companion</string>
     <string name="nav_chat">Chat</string>
     <string name="nav_math">Math Solver</string>
-    <string name="nav_ai_video">AI Video</string>
+    <string name="nav_ai_image">AI Image</string>
     <string name="nav_history">History</string>
     <string name="nav_profile">Profile</string>
     <string name="nav_settings">Settings</string>

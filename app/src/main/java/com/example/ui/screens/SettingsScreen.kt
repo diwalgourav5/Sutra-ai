@@ -483,8 +483,7 @@ fun SettingsScreen(
                     TelemetryRow("Backend Base URL", diagnostics.activeEndpoint)
                     TelemetryRow("Fast Multimodal Model", diagnostics.primaryChatModel)
                     TelemetryRow("Math & Reasoning Model", diagnostics.reasoningMathModel)
-                    TelemetryRow("AI Video Fast Model", diagnostics.videoFastModel)
-                    TelemetryRow("AI Video High Model", diagnostics.videoHighModel)
+                    TelemetryRow("AI Image Model", diagnostics.imageModel)
                     TelemetryRow(
                         "Rate Limiter Window",
                         "${diagnostics.requestsInLastMinute} / ${diagnostics.maxRequestsPerMinute} req/min"

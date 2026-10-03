@@ -35,19 +35,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.MovieFilter
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Calculate
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.FilledTonalButton
@@ -86,17 +85,17 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.AppThemeMode
 import com.example.data.model.AvatarPreset
 import com.example.data.model.ConversationEntity
-import com.example.data.model.GeneratedVideoEntity
+import com.example.data.model.GeneratedImageEntity
 import com.example.data.model.UserProfileEntity
 import com.example.ui.components.ProfileAvatarBadge
 import com.example.ui.components.SutraBrandAvatar
 import com.example.ui.components.VoiceInteractionBottomSheet
 import com.example.ui.screens.ChatScreen
 import com.example.ui.screens.HistoryScreen
+import com.example.ui.screens.ImageGeneratorScreen
 import com.example.ui.screens.MathSolverScreen
 import com.example.ui.screens.ProfileScreen
 import com.example.ui.screens.SettingsScreen
-import com.example.ui.screens.VideoGeneratorScreen
 import com.example.ui.theme.SutraAITheme
 import com.example.ui.viewmodel.AppDestination
 import com.example.ui.viewmodel.SutraViewModel
@@ -111,7 +110,7 @@ import kotlinx.coroutines.launch
 private enum class MediaCaptureTarget {
     CHAT,
     MATH,
-    VIDEO
+    IMAGE
 }
 
 class MainActivity : ComponentActivity() {
@@ -175,16 +174,14 @@ fun SutraAssistantRootApp(viewModel: SutraViewModel) {
     val mathStreamingText by viewModel.mathStreamingText.collectAsStateWithLifecycle()
     val mathSolutionResult by viewModel.mathSolutionResult.collectAsStateWithLifecycle()
 
-    // AI Video Generator States
-    val videoPromptText by viewModel.videoPromptText.collectAsStateWithLifecycle()
-    val selectedVideoDuration by viewModel.selectedVideoDuration.collectAsStateWithLifecycle()
-    val selectedVideoAspectRatio by viewModel.selectedVideoAspectRatio.collectAsStateWithLifecycle()
-    val selectedVideoQuality by viewModel.selectedVideoQuality.collectAsStateWithLifecycle()
-    val videoSourceImage by viewModel.videoSourceImage.collectAsStateWithLifecycle()
-    val videoProgress by viewModel.videoProgress.collectAsStateWithLifecycle()
-    val activePlayingVideo by viewModel.activePlayingVideo.collectAsStateWithLifecycle()
-    val videoErrorBanner by viewModel.videoErrorBanner.collectAsStateWithLifecycle()
-    val myVideosHistory by viewModel.myVideosHistory.collectAsStateWithLifecycle()
+    // AI Image Generator States
+    val imagePromptText by viewModel.imagePromptText.collectAsStateWithLifecycle()
+    val selectedImageAspectRatio by viewModel.selectedImageAspectRatio.collectAsStateWithLifecycle()
+    val imageSourceImage by viewModel.imageSourceImage.collectAsStateWithLifecycle()
+    val isGeneratingImage by viewModel.isGeneratingImage.collectAsStateWithLifecycle()
+    val activePreviewImage by viewModel.activePreviewImage.collectAsStateWithLifecycle()
+    val imageErrorBanner by viewModel.imageErrorBanner.collectAsStateWithLifecycle()
+    val myImagesHistory by viewModel.myImagesHistory.collectAsStateWithLifecycle()
 
     // API Diagnostics
     val apiDiagnostics by viewModel.apiDiagnostics.collectAsStateWithLifecycle()
@@ -195,10 +192,10 @@ fun SutraAssistantRootApp(viewModel: SutraViewModel) {
     val speakingMessageId by (viewModel.voiceManager?.speakingMessageId ?: remember { MutableStateFlow(null) })
         .collectAsStateWithLifecycle()
 
-    // Track whether the photo/camera launch is for Chat, MathSolver, or AI Video
+    // Track whether the photo/camera launch is for Chat, MathSolver, or AI Image
     var mediaTarget by rememberSaveable { mutableStateOf(MediaCaptureTarget.CHAT) }
 
-    // 1. Zero-Permission Photo Picker for Chat / Math Solver / AI Video Image-to-Video
+    // 1. Zero-Permission Photo Picker for Chat / Math Solver / AI Image
     val galleryImagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -206,7 +203,7 @@ fun SutraAssistantRootApp(viewModel: SutraViewModel) {
             when (mediaTarget) {
                 MediaCaptureTarget.CHAT -> viewModel.attachFromUri(context, uri, forMathSolver = false)
                 MediaCaptureTarget.MATH -> viewModel.attachFromUri(context, uri, forMathSolver = true)
-                MediaCaptureTarget.VIDEO -> viewModel.attachVideoSourceImageFromUri(context, uri)
+                MediaCaptureTarget.IMAGE -> viewModel.attachImageSourceFromUri(context, uri)
             }
         }
     }
@@ -240,7 +237,7 @@ fun SutraAssistantRootApp(viewModel: SutraViewModel) {
             when (mediaTarget) {
                 MediaCaptureTarget.CHAT -> viewModel.attachCameraBitmap(bitmap, forMathSolver = false)
                 MediaCaptureTarget.MATH -> viewModel.attachCameraBitmap(bitmap, forMathSolver = true)
-                MediaCaptureTarget.VIDEO -> viewModel.attachVideoCameraBitmap(bitmap)
+                MediaCaptureTarget.IMAGE -> viewModel.attachImageCameraBitmap(bitmap)
             }
         }
     }
@@ -279,14 +276,14 @@ fun SutraAssistantRootApp(viewModel: SutraViewModel) {
         }
     }
 
-    // 6. Custom Save-As Export Launcher for MP4 Video
-    var pendingExportVideoEntity by remember { mutableStateOf<GeneratedVideoEntity?>(null) }
-    val createVideoDocumentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("video/mp4")
+    // 6. Custom Save-As Export Launcher for Generated Image
+    var pendingExportImageEntity by remember { mutableStateOf<GeneratedImageEntity?>(null) }
+    val createImageDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("image/jpeg")
     ) { uri ->
-        val videoToExport = pendingExportVideoEntity
-        if (uri != null && videoToExport != null) {
-            viewModel.exportVideoToCustomUri(context, videoToExport, uri)
+        val imageToExport = pendingExportImageEntity
+        if (uri != null && imageToExport != null) {
+            viewModel.exportImageToCustomUri(context, imageToExport, uri)
         }
     }
 
@@ -344,9 +341,9 @@ fun SutraAssistantRootApp(viewModel: SutraViewModel) {
                     coroutineScope.launch { drawerState.close() }
                     viewModel.startNewChat()
                 },
-                onOpenAiVideoStudio = {
+                onOpenAiImageStudio = {
                     coroutineScope.launch { drawerState.close() }
-                    viewModel.navigateTo(AppDestination.AI_VIDEO)
+                    viewModel.navigateTo(AppDestination.AI_IMAGE)
                 },
                 onSelectConversation = { id ->
                     coroutineScope.launch { drawerState.close() }
@@ -489,49 +486,43 @@ fun SutraAssistantRootApp(viewModel: SutraViewModel) {
                         )
                     }
 
-                    AppDestination.AI_VIDEO -> {
-                        VideoGeneratorScreen(
-                            promptText = videoPromptText,
-                            selectedDuration = selectedVideoDuration,
-                            selectedAspectRatio = selectedVideoAspectRatio,
-                            selectedQuality = selectedVideoQuality,
-                            sourceImage = videoSourceImage,
-                            progress = videoProgress,
-                            activePlayingVideo = activePlayingVideo,
-                            errorBanner = videoErrorBanner,
-                            myVideos = myVideosHistory,
-                            isApiKeyConfigured = apiDiagnostics.isKeyConfigured,
-                            onUpdatePrompt = viewModel::updateVideoPrompt,
-                            onSelectDuration = viewModel::selectVideoDuration,
-                            onSelectAspectRatio = viewModel::selectVideoAspectRatio,
-                            onSelectQuality = viewModel::selectVideoQuality,
-                            onPickSourceImage = {
-                                mediaTarget = MediaCaptureTarget.VIDEO
+                    AppDestination.AI_IMAGE -> {
+                        ImageGeneratorScreen(
+                            promptText = imagePromptText,
+                            selectedAspectRatio = selectedImageAspectRatio,
+                            sourceImage = imageSourceImage,
+                            isGenerating = isGeneratingImage,
+                            activePreviewImage = activePreviewImage,
+                            errorBanner = imageErrorBanner,
+                            imagesHistory = myImagesHistory,
+                            onUpdatePrompt = viewModel::updateImagePrompt,
+                            onSelectAspectRatio = viewModel::selectImageAspectRatio,
+                            onPickGalleryImage = {
+                                mediaTarget = MediaCaptureTarget.IMAGE
                                 galleryImagePicker.launch(
                                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                 )
                             },
-                            onTakeSourceCameraPhoto = {
-                                mediaTarget = MediaCaptureTarget.VIDEO
+                            onTakeCameraPhoto = {
+                                mediaTarget = MediaCaptureTarget.IMAGE
                                 cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
                             },
-                            onClearSourceImage = viewModel::clearVideoSourceImage,
-                            onGenerateVideo = { viewModel.generateAiVideo(context) },
-                            onCancelGeneration = viewModel::cancelVideoGeneration,
-                            onRetryGeneration = { failedEntity ->
-                                viewModel.retryVideoGeneration(context, failedEntity)
-                            },
-                            onDismissErrorBanner = viewModel::dismissVideoErrorBanner,
-                            onSelectVideoForPlayback = viewModel::selectVideoForPlayback,
-                            onDeleteVideo = viewModel::deleteGeneratedVideo,
-                            onQuickSaveVideo = { video ->
-                                viewModel.quickSaveVideoCopy(context, video)
-                            },
-                            onExportVideoAs = { video ->
-                                pendingExportVideoEntity = video
+                            onClearSourceImage = viewModel::clearImageSource,
+                            onDismissErrorBanner = viewModel::dismissImageErrorBanner,
+                            onGenerateImage = { viewModel.generateAiImage(context) },
+                            onRegenerateImage = { img -> viewModel.regenerateImage(context, img) },
+                            onRetryGeneration = { failedImg -> viewModel.retryImageGeneration(context, failedImg) },
+                            onCancelGeneration = viewModel::cancelImageGeneration,
+                            onSelectImageForPreview = viewModel::selectImageForPreview,
+                            onClearActivePreview = viewModel::clearActivePreview,
+                            onDeleteImage = viewModel::deleteGeneratedImage,
+                            onSaveToGallery = { img -> viewModel.saveImageToGallery(context, img) },
+                            onExportCustomUri = { img ->
+                                pendingExportImageEntity = img
                                 val ts = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())
-                                createVideoDocumentLauncher.launch("sutra_ai_video_$ts.mp4")
-                            }
+                                createImageDocumentLauncher.launch("sutra_ai_image_$ts.jpg")
+                            },
+                            onShowToast = viewModel::showMessage
                         )
                     }
 
@@ -641,7 +632,7 @@ private fun SutraNavigationDrawerSheet(
     conversations: List<ConversationEntity>,
     activeConversationId: Long?,
     onStartNewChat: () -> Unit,
-    onOpenAiVideoStudio: () -> Unit,
+    onOpenAiImageStudio: () -> Unit,
     onSelectConversation: (Long) -> Unit,
     onOpenAllHistory: () -> Unit,
     onOpenProfile: () -> Unit,
@@ -671,7 +662,7 @@ private fun SutraNavigationDrawerSheet(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Chat • Math • AI Video Studio",
+                        text = "Chat • Math • AI Image Studio",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -732,15 +723,15 @@ private fun SutraNavigationDrawerSheet(
             Spacer(modifier = Modifier.height(8.dp))
 
             FilledTonalButton(
-                onClick = onOpenAiVideoStudio,
+                onClick = onOpenAiImageStudio,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(44.dp)
-                    .testTag("drawer_ai_video_button")
+                    .testTag("drawer_ai_image_button")
             ) {
-                Icon(Icons.Default.MovieFilter, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("AI Video Generator", fontWeight = FontWeight.SemiBold)
+                Text("AI Image Studio", fontWeight = FontWeight.SemiBold)
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -837,7 +828,7 @@ private fun SutraBottomNavigationBar(
             val (selectedIcon, unselectedIcon) = when (dest) {
                 AppDestination.CHAT -> Icons.AutoMirrored.Filled.Chat to Icons.AutoMirrored.Outlined.Chat
                 AppDestination.MATH_SOLVER -> Icons.Default.Calculate to Icons.Outlined.Calculate
-                AppDestination.AI_VIDEO -> Icons.Default.Videocam to Icons.Outlined.Videocam
+                AppDestination.AI_IMAGE -> Icons.Default.AutoAwesome to Icons.Outlined.AutoAwesome
                 AppDestination.HISTORY -> Icons.Default.History to Icons.Outlined.History
                 AppDestination.PROFILE -> Icons.Default.Person to Icons.Outlined.Person
                 AppDestination.SETTINGS -> Icons.Default.Settings to Icons.Outlined.Settings
