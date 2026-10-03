@@ -1,3 +1,4 @@
+.build-outputs/
 *.iml
 .gradle
 .kotlin
